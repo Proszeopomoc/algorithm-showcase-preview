@@ -1,0 +1,1 @@
+TEMPORARY GitHub Pages preview. Only browser deliverables HTML, JS, CSS, WASM. Original C++ source remains in a separate private repository. Remove public preview after demonstration.

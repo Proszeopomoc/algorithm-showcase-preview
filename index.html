@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="pl"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark"><meta name="robots" content="noindex,nofollow,noarchive"><meta name="referrer" content="no-referrer">
+<meta name="description" content="C++20 WebAssembly pathfinding, on-device benchmark, and moving-target snapshot TSP prototypes.">
+<title>Algorithm Showcase — C++20 / WebAssembly</title>
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+<header class="site-head">
+  <div class="container top"><div class="brand"><span class="brand-mark">◈</span> ALGORITHM / LAB <small>PREVIEW 01</small></div><div id="engine-status" class="status">Ładowanie WebAssembly…</div></div>
+  <div class="container hero">
+    <div class="eyebrow">C++20 → WEBASSEMBLY · LOCAL COMPUTE</div>
+    <h1>Algorytmy, które można <em>przetestować</em>.</h1>
+    <p>Trzy interaktywne prototypy. Działający kod C++, własny procesor, jawna metodologia i weryfikacja każdej ścieżki.</p>
+    <div class="head-caveat">Research prototype · Wynik 1,54× pochodzi z odrębnego testu natywnego Linux, <strong>nie</strong> z tej przeglądarki.</div>
+  </div>
+</header>
+<nav class="nav container" aria-label="Projekty">
+  <button class="nav-item selected" data-tab="path">01 / PATHFINDING</button>
+  <button class="nav-item" data-tab="benchmark">02 / BENCHMARK LAB</button>
+  <button class="nav-item" data-tab="fireflies">03 / MOVING TARGETS</button>
+</nav>
+<main class="container">
+<section class="view" id="view-path">
+  <div class="section-intro"><div><div class="eyebrow">01 / INTERACTIVE GRID</div><h2>Dynamic Pathfinding</h2><p>Dodaj przeszkodę. Usuń przeszkodę. Obserwuj, kiedy D* Lite musi liczyć nową ścieżkę, a kiedy może bezpiecznie użyć starej.</p></div><span class="tech-tag">4-neighbor · fixed endpoints</span></div>
+  <div class="path-layout"><div class="canvas-holder">
+    <canvas id="path-canvas" width="640" height="640" aria-label="Edytowalna mapa ścieżek"></canvas>
+    <div class="canvas-caption">Mysz: przytrzymaj i maluj. Dotyk: maluj wybranym narzędziem. Start i cel są stałe w narożnikach.</div>
+  </div>
+  <aside class="control-panel">
+    <label class="field">Silnik <select id="path-method"><option value="2">D* Lite + safe gate</option><option value="1">D* Lite</option><option value="0">A* — od zera</option></select></label>
+    <label class="field">Narzędzie <select id="path-brush"><option value="1">Blokuj komórki</option><option value="0">Odblokuj komórki</option></select></label>
+    <div class="pair"><button id="path-new">Nowa mapa</button><button id="path-clear" class="secondary">Wyczyść</button></div>
+    <div class="rule"></div>
+    <div class="metrics"><div><small>Długość najkrótszej trasy</small><strong id="path-cost">—</strong></div><div><small>Ostatnia aktualizacja (WASM)</small><strong id="path-time">—</strong></div><div><small>Bezpiecznie pominięte naprawy</small><strong id="path-skips">0</strong></div><div><small>Weryfikacja niezależnym BFS</small><strong id="path-check">—</strong></div></div>
+    <p class="hint">Wynik w tej symulacji obejmuje najkrótszą ścieżkę na jednorodnej siatce 2D. Nie uwzględnia innych agentów ani fizyki.</p>
+  </aside></div>
+</section>
+<section class="view hidden" id="view-benchmark">
+  <div class="section-intro"><div><div class="eyebrow">02 / YOUR CPU, YOUR RESULT</div><h2>Browser Benchmark Lab</h2><p>Ten sam strumień zmian dla trzech implementacji C++. Poprawność każdej trasy weryfikuje niezależny BFS w JavaScript.</p></div><span class="tech-tag">WASM · local only</span></div>
+  <div class="bench-actions"><label class="field inline">Powtórzenia <select id="bench-repeats"><option value="1">1 — szybki</option><option value="2" selected>2 — standardowy</option><option value="5">5 — rozszerzony</option></select></label><button id="bench-start">Uruchom pomiar</button><button id="bench-export" class="secondary" disabled>Eksport JSON</button></div>
+  <div id="bench-status" class="information">Próba obejmuje 12 map (16²/32²/64² × 4 seedy) i 75 zdarzeń na mapę. To <strong>nowy, jawny zestaw przeglądarkowy</strong>; nie identyczne zdarzenia z historycznego Pythona.</div>
+  <div class="chart-wrap"><canvas id="bench-chart" width="1120" height="410" aria-label="Wykres wyników benchmarku"></canvas></div>
+  <div id="bench-table" class="table-wrap"><p class="empty">Po uruchomieniu pojawią się wyniki.</p></div>
+  <p class="hint">Mierzony czas = wyłącznie wywołanie natywnego kernela WebAssembly. Generowanie map, niezależna walidacja BFS, renderowanie, zimny start WASM i przesyłanie danych są wyłączone z podawanego czasu. Wynik zależy od sprzętu i przeglądarki. Używamy własnej implementacji D* Lite jako baseline.</p>
+  <details class="method"><summary>Historyczne wyniki native (nie są pomiarem tej strony)</summary><p>W teście Linux/GitHub Actions 12 map, 900 zdarzeń, 900/900 prawidłowych tras, Gate+D* Lite osiągnął sumaryczny czas przetwarzania 14,96 ms wobec 23,01 ms dla implementacji D* Lite z repozytorium: ~1,54×. Inne testy dały mniejszy zysk. To zależny od obciążenia wynik, a nie gwarancja.</p><a href="https://github.com/Proszeopomoc/mcdo-benchmark/blob/main/reports/2026-11-01-41331724171/C_API_VERIFICATION.md" target="_blank" rel="noreferrer">Protokół źródłowy</a></details>
+</section>
+<section class="view hidden" id="view-fireflies">
+  <div class="section-intro"><div><div class="eyebrow">03 / DYNAMIC WORLD, STATIC SNAPSHOTS</div><h2>Moving Target TSP <span class="accent">/ Fireflies</span></h2><p>Świetliki nie zatrzymują się. Dwa niezależne łowce dostają aktualne pozycje i na bieżąco przeliczają kolejność odwiedzin.</p></div><span class="tech-tag">Snapshot TSP · experimental</span></div>
+  <div class="fire-actions"><label class="field inline">Świetliki <select id="fire-count"><option value="50" selected>50</option><option value="100">100</option></select></label><label class="field inline">Prędkość celów <select id="fire-speed"><option value="15">Spokojnie</option><option value="32" selected>Normalnie</option><option value="55">Szybko</option></select></label><button id="fire-start">Start</button><button id="fire-reset" class="secondary">Reset sceny</button></div>
+  <div class="duo">
+    <div class="fire-card"><div class="fire-label">MCDO_PORT <span>k-nearest candidate 2-opt</span></div><canvas id="fire-canvas-0" width="560" height="380"></canvas><div id="fire-stats-0" class="fire-stats">Gotowy do startu</div></div>
+    <div class="fire-card"><div class="fire-label">FULL 2-OPT <span>shared moving targets, independent hunter</span></div><canvas id="fire-canvas-1" width="560" height="380"></canvas><div id="fire-stats-1" class="fire-stats">Gotowy do startu</div></div>
+  </div>
+  <div class="information"><strong>Ważne:</strong> To dwie heurystyki statycznego TSP wykonywane wielokrotnie na bieżących pozycjach. Nie przewidują przyszłych położeń i nie obliczają matematycznie optymalnego przechwycenia ruchomych celów. LKH-3 nie jest w tej wersji porównywany z powodu odrębnych warunków użycia i nierównych metod pomiaru.</div>
+  <p class="hint">Silniki pracują w Web Worker. Cel planowania: około 10 aktualizacji na sekundę, bez gwarancji. Każdy nieotrzymany na czas plan jest oznaczany w statystykach. Cele poruszają się tak samo w obu scenach, ale każdy łowca ma osobną listę przechwyceń.</p>
+</section>
+</main>
+<footer class="container footer"><span>ALGORITHM / LAB · LOCAL PROTOTYPE</span><span>Source + constraints: <a href="https://github.com/Proszeopomoc/mcdo-benchmark" target="_blank" rel="noreferrer">mcdo-benchmark</a></span></footer>
+<script type="module" src="./app.mjs"></script>
+</body></html>
