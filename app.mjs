@@ -1,7 +1,7 @@
 import {makeFixture,rng32} from './verifier.mjs';
 
 const $=s=>document.querySelector(s);
-const worker=new Worker(new URL('./engine-worker.mjs?v=benchmark-fixed-20261102',import.meta.url),{type:'module'});
+const worker=new Worker(new URL('./engine-worker.mjs?v=mdo-explainer-20261102',import.meta.url),{type:'module'});
 const pending=new Map();
 let nextID=1;
 function status(txt,ok=true){$('#engine-status').textContent=txt;$('#engine-status').style.color=ok?'#8fc6b5':'#ee9d93';}
@@ -39,75 +39,167 @@ function selectTab(tab){
 }
 for(const el of document.querySelectorAll('[data-tab]'))el.addEventListener('click',()=>selectTab(el.dataset.tab));
 
-// -- pathfinding grid
-let mapSeed=13,gridN=32,gridCells=makeFixture(32,mapSeed,0).initial,gridRoute=[];
+// -- Pathfinding comparison. The worker owns TWO actual C++20 instances.
+function starterGrid(){
+  // Two crossings avoid a misleading "all routes disappear" first lesson.
+  const w=16,blocked=new Uint8Array(w*w);
+  for(let y=0;y<w;y++)if(y!==5&&y!==12)blocked[y*w+8]=1;
+  return blocked;
+}
+let mapSeed=13,gridN=16,gridCells=starterGrid(),gridRoute=[];
 let gridSkips=0,gridPainting=false,gridQueue=Promise.resolve();
+let activeBrush=1,lastEdited=-1,undoStack=[];
 const pathCanvas=$('#path-canvas'),ctx=pathCanvas.getContext('2d');
 function drawGrid(){
   const N=gridN,step=pathCanvas.width/N;
   ctx.fillStyle='#101b24';ctx.fillRect(0,0,pathCanvas.width,pathCanvas.height);
   for(let v=0;v<N*N;v++)if(gridCells[v]){
-    ctx.fillStyle='#2e4350';ctx.fillRect(v%N*step+1,Math.floor(v/N)*step+1,step-2,step-2);
+    ctx.fillStyle='#465c6c';ctx.fillRect(v%N*step+1,Math.floor(v/N)*step+1,step-2,step-2);
   }
   if(gridRoute.length){
-    ctx.beginPath();
-    gridRoute.forEach((v,i)=>{
-      const x=(v%N+.5)*step,y=(Math.floor(v/N)+.5)*step;
-      i?ctx.lineTo(x,y):ctx.moveTo(x,y);
-    });
-    ctx.lineWidth=Math.max(2,step*.32);ctx.strokeStyle='#72ecb6';ctx.lineJoin='round';ctx.lineCap='round';ctx.stroke();
+    for(const [stroke,width] of [['#092521',.48],['#6ff0b7',.30]]){
+      ctx.beginPath();
+      gridRoute.forEach((v,i)=>{
+        const x=(v%N+.5)*step,y=(Math.floor(v/N)+.5)*step;
+        i?ctx.lineTo(x,y):ctx.moveTo(x,y);
+      });
+      ctx.lineWidth=Math.max(2,step*width);ctx.strokeStyle=stroke;
+      ctx.lineJoin='round';ctx.lineCap='round';ctx.stroke();
+    }
   }
-  ctx.strokeStyle='rgba(169,216,215,.08)';ctx.lineWidth=1;ctx.beginPath();
-  for(let x=0;x<=N;x++){ctx.moveTo(x*step,0);ctx.lineTo(x*step,pathCanvas.height);ctx.moveTo(0,x*step);ctx.lineTo(pathCanvas.width,x*step);}ctx.stroke();
-  const marker=(v,color,text)=>{
+  ctx.strokeStyle='rgba(187,211,217,.10)';ctx.lineWidth=1;ctx.beginPath();
+  for(let x=0;x<=N;x++){
+    ctx.moveTo(x*step,0);ctx.lineTo(x*step,pathCanvas.height);
+    ctx.moveTo(0,x*step);ctx.lineTo(pathCanvas.width,x*step);
+  }ctx.stroke();
+  if(lastEdited>0&&lastEdited<N*N-1){
+    const x=lastEdited%N*step,y=Math.floor(lastEdited/N)*step;
+    ctx.strokeStyle='#ffe493';ctx.lineWidth=3;ctx.strokeRect(x+2,y+2,step-4,step-4);
+  }
+  function marker(v,color,text){
     const x=(v%N+.5)*step,y=(Math.floor(v/N)+.5)*step;
-    ctx.fillStyle=color;ctx.beginPath();ctx.arc(x,y,step*.43,0,Math.PI*2);ctx.fill();
-    ctx.fillStyle='#081519';ctx.textAlign='center';ctx.textBaseline='middle';ctx.font='bold '+Math.floor(step*.52)+'px system-ui';ctx.fillText(text,x,y+1);
-  };
-  marker(0,'#88e7c5','S');marker(N*N-1,'#ffc580','G');
+    ctx.fillStyle=color;ctx.beginPath();ctx.arc(x,y,step*.45,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#092321';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.font='bold '+Math.floor(step*.48)+'px system-ui';ctx.fillText(text,x,y+1);
+  }
+  marker(0,'#7bffcf','S');marker(N*N-1,'#ffd18a','C');
+}
+function messagePath(text,kind='normal'){
+  const el=$('#path-action-result');el.textContent=text;el.dataset.tone=kind;
+}
+function refreshUndo(){ $('#path-undo').disabled=undoStack.length===0; }
+function setBrush(mode){
+  activeBrush=mode;
+  for(const [id,value] of [['#path-brush-add',1],['#path-brush-erase',0]]){
+    const chosen=mode===value,el=$(id);
+    el.classList.toggle('active',chosen);
+    el.setAttribute('aria-pressed',String(chosen));
+  }
 }
 function updateGridUI(res){
+  if(res.baselineCost!==res.cost)throw new Error('D* Lite / MDO costs differ');
   gridRoute=res.route;
-  $('#path-cost').textContent=res.cost<0?'Brak trasy':res.cost+' pól';
-  $('#path-time').textContent=res.kernelUs===undefined?'—':res.kernelUs.toFixed(2)+' µs';
-  gridSkips+=res.skipped||0;$('#path-skips').textContent=String(gridSkips);
-  $('#path-check').textContent='BFS PASS';drawGrid();
+  $('#path-cost').textContent=res.cost<0?'Brak przejścia':res.cost+' kroków';
+  $('#path-time').textContent=res.enhancedKernelUs===undefined?'—':res.enhancedKernelUs.toFixed(2)+' µs';
+  $('#path-baseline-time').textContent=res.baselineKernelUs===undefined?'—':res.baselineKernelUs.toFixed(2)+' µs';
+  const events=res.events||0,avoided=res.avoided||0;
+  gridSkips=avoided;$('#path-skips').textContent=String(avoided);
+  $('#path-baseline-count').textContent=String(events);
+  $('#path-enhanced-count').textContent=String(events-avoided);
+  $('#path-avoided').textContent=avoided+' z '+events;
+  $('#path-benefit-bar').style.width=(events?100*avoided/events:0)+'%';
+  $('#path-benefit-desc').textContent=events?
+    ('W '+avoided+' z '+events+' zmian nasza bramka zachowała już poprawną trasę, bez wywoływania D* Lite.'):
+    'Uruchom scenariusz ①, aby zobaczyć konkretną różnicę.';
+  $('#path-baseline-action').textContent=events?'↻ Aktualizował plan':'Czeka na zmianę';
+  $('#path-enhanced-action').textContent=events?
+    (res.skipped?'✓ Bez przeliczania':'↻ Aktualizował plan'):'Czeka na zmianę';
+  $('#path-check').textContent='✓ Oba poprawne';
+  drawGrid();
 }
-async function initGrid(){
+function initGrid(){
   gridQueue=gridQueue.then(async()=>{
-    gridSkips=0;$('#path-skips').textContent='0';gridRoute=[];drawGrid();
-    const res=await request('init-grid',{width:gridN,cells:Array.from(gridCells),method:Number($('#path-method').value)});
+    gridSkips=0;gridRoute=[];lastEdited=-1;drawGrid();
+    const res=await request('init-grid',{width:gridN,cells:Array.from(gridCells)});
     updateGridUI(res);
-  }).catch(err=>{status(err.message,false);$('#path-check').textContent='BŁĄD';});
+    messagePath('Gotowe. Spróbuj najpierw scenariusza ①: przeszkoda poza trasą.','normal');
+  }).catch(err=>{
+    status(err.message,false);$('#path-check').textContent='BŁĄD';
+    messagePath('Nie udało się wczytać mapy: '+err.message,'error');
+  });
   return gridQueue;
 }
 function cellFromPointer(e){
   const b=pathCanvas.getBoundingClientRect();
-  const x=Math.floor((e.clientX-b.left)/b.width*gridN),y=Math.floor((e.clientY-b.top)/b.height*gridN);
+  const x=Math.floor((e.clientX-b.left)/b.width*gridN);
+  const y=Math.floor((e.clientY-b.top)/b.height*gridN);
   if(x<0||y<0||x>=gridN||y>=gridN)return -1;
   return y*gridN+x;
 }
-function paint(e){
-  if(!gridPainting)return;
-  const cell=cellFromPointer(e);
-  if(cell<=0||cell>=gridN*gridN-1)return;
-  const blocked=Number($('#path-brush').value);
-  if(gridCells[cell]===blocked)return;
-  gridCells[cell]=blocked;drawGrid();
+function applyGridEdit(vertex,blocked,{remember=true}={}){
+  if(vertex<=0||vertex>=gridN*gridN-1)return;
+  const before=gridCells[vertex];
+  if(before===blocked)return;
+  if(remember){undoStack.push({vertex,blocked:before});refreshUndo();}
+  gridCells[vertex]=blocked;lastEdited=vertex;drawGrid();
   gridQueue=gridQueue.then(async()=>{
-    const res=await request('grid-toggle',{vertex:cell,blocked});
+    const previous=gridRoute.slice();
+    const res=await request('grid-toggle',{vertex,blocked});
     updateGridUI(res);
-  }).catch(err=>{status(err.message,false);$('#path-check').textContent='BŁĄD';});
+    const changed=previous.length!==res.route.length||
+      previous.some((v,i)=>v!==res.route[i]);
+    if(res.cost<0)messagePath('Droga została odcięta. Usuń przeszkodę, aby znaleźć przejście.','warning');
+    else if(res.skipped)messagePath('Oszczędność! Zwykły D* Lite wykonał aktualizację. Nasz wariant rozpoznał, że ściana jest poza trasą, i zachował ją bez przeliczania. Oba wyniki są poprawne.','success');
+    else if(changed)messagePath('Przeszkoda wpłynęła na trasę. Oba silniki przeliczyły plan i znalazły poprawną drogę.','normal');
+    else messagePath('Oba silniki wykonały aktualizację, ale nadal znalazły tę samą najkrótszą drogę.');
+  }).catch(err=>{
+    status(err.message,false);$('#path-check').textContent='BŁĄD';
+    messagePath('Błąd aktualizacji: '+err.message,'error');
+  });
 }
-pathCanvas.addEventListener('pointerdown',e=>{gridPainting=true;pathCanvas.setPointerCapture(e.pointerId);paint(e);});
+function paint(e){
+  if(gridPainting)applyGridEdit(cellFromPointer(e),activeBrush);
+}
+pathCanvas.addEventListener('pointerdown',e=>{
+  if(e.button!==undefined&&e.button!==0)return;
+  gridPainting=true;pathCanvas.setPointerCapture(e.pointerId);paint(e);
+});
 pathCanvas.addEventListener('pointermove',paint);
 pathCanvas.addEventListener('pointerup',()=>gridPainting=false);
 pathCanvas.addEventListener('pointercancel',()=>gridPainting=false);
+pathCanvas.addEventListener('lostpointercapture',()=>gridPainting=false);
 pathCanvas.addEventListener('contextmenu',e=>e.preventDefault());
-$('#path-method').addEventListener('change',initGrid);
-$('#path-new').addEventListener('click',()=>{gridCells=makeFixture(gridN,++mapSeed,0).initial;initGrid();});
-$('#path-clear').addEventListener('click',()=>{gridCells=new Uint8Array(gridN*gridN);initGrid();});
-drawGrid();
+$('#path-brush-add').addEventListener('click',()=>setBrush(1));
+$('#path-brush-erase').addEventListener('click',()=>setBrush(0));
+$('#path-demo-away').addEventListener('click',()=>{
+  const onPath=new Set(gridRoute);
+  // Any open non-endpoint off-path cell is a valid certificate case.
+  const cells=[];
+  for(let i=1;i<gridCells.length-1;i++)if(!gridCells[i]&&!onPath.has(i))cells.push(i);
+  if(!cells.length){messagePath('Na tej mapie nie ma wolnego pola poza trasą. Kliknij „Inna mapa”.','warning');return;}
+  setBrush(1);applyGridEdit(cells[Math.floor(cells.length*.5)],1);
+});
+$('#path-demo').addEventListener('click',()=>{
+  if(gridRoute.length<=2){messagePath('Nie ma dostępnej trasy — usuń ścianę lub wyczyść mapę.','warning');return;}
+  let candidate=gridRoute[Math.floor(gridRoute.length*.50)];
+  if(candidate===0||candidate===gridN*gridN-1||gridCells[candidate])
+    candidate=gridRoute.find(v=>v>0&&v<gridN*gridN-1&&!gridCells[v]);
+  if(candidate===undefined)return;
+  setBrush(1);applyGridEdit(candidate,1);
+});
+$('#path-undo').addEventListener('click',()=>{
+  const last=undoStack.pop();refreshUndo();
+  if(last){setBrush(last.blocked);applyGridEdit(last.vertex,last.blocked,{remember:false});}
+});
+$('#path-new').addEventListener('click',()=>{
+  gridCells=makeFixture(gridN,++mapSeed,0).initial;
+  undoStack=[];refreshUndo();initGrid();
+});
+$('#path-clear').addEventListener('click',()=>{
+  gridCells=new Uint8Array(gridN*gridN);
+  undoStack=[];refreshUndo();initGrid();
+});
+setBrush(1);drawGrid();
 
 // -- browser benchmark
 let benchmarkData=null;
@@ -142,8 +234,8 @@ function renderBenchmark(r){
     rows.map(x=>'<tr><th>'+x.name+'</th><td>'+x.validated+'/'+r.perAlgorithmEvents+
     '</td><td>'+x.totalKernelMs.toFixed(3)+' ms</td><td>'+x.medianUs.toFixed(3)+
     ' µs</td><td>'+x.p95Us.toFixed(3)+' µs</td><td>'+x.skipped+'</td></tr>').join('')+'</tbody></table>'+
-    '<p class="hint">Stosunek całkowitego czasu D* Lite / Gate: <strong>'+r.ratioVsDStar.toFixed(3)+
-    '×</strong>. Wartości mniejsze niż 1 oznaczają, że Gate było wolniejsze.</p>';
+    '<p class="hint">Stosunek całkowitego czasu D* Lite / MDO Safe Reuse:  <strong>'+r.ratioVsDStar.toFixed(3)+
+    '×</strong>. Wartości mniejsze niż 1 oznaczają, że MDO było wolniejsze.</p>';
   const c=$('#bench-chart'),g=c.getContext('2d'),W=c.width,H=c.height;
   g.clearRect(0,0,W,H);g.fillStyle='#131920';g.fillRect(0,0,W,H);
   g.fillStyle='#a6bac4';g.font='18px system-ui';g.fillText('Łączny czas aktualizacji algorytmu — WASM / Twoja przeglądarka',40,39);
