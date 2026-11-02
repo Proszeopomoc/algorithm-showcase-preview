@@ -4,7 +4,7 @@ import {makeFixture,assertGridRoute,validateTour,roundedTourCost} from './verifi
 const ready=createEngine({
   locateFile:(name)=>new URL(name,import.meta.url).href,
 });
-let grid=null,engine=null;
+let gridPair=null,engine=null;
 const A={};
 function post(id,type,data={}){self.postMessage({id,type,...data});}
 function int32(module,ptr,n){return Array.from(module.HEAP32.subarray(ptr>>2,(ptr>>2)+n));}
@@ -52,7 +52,7 @@ function toggleGrid(obj,vertex,blocked){
   }catch(err){
     // Leave invalid instance unavailable; next command must reinitialize.
     deleteGrid(obj);
-    if(grid===obj)grid=null;
+    if(gridPair?.baseline===obj||gridPair?.enhanced===obj)gridPair=null;
     obj.cells[vertex]=original;
     throw err;
   }
@@ -86,7 +86,7 @@ async function runBenchmark(module,id,repeat=2){
   const fixtures=sizes.flatMap(width=>seeds.map(seed=>makeFixture(width,seed,75)));
   const samples=[[],[],[]],byMethod=[];
   let eventsCount=0;
-  const algorithmNames=['A*','D* Lite','Gate + D* Lite'];
+  const algorithmNames=['A*','D* Lite','MDO Safe Reuse + D* Lite'];
   // Equal suite for all methods, each run uses fresh native state.
   for(let mode=0;mode<3;mode++){
     let valid=0,skipped=0,computeMs=0;
@@ -121,13 +121,34 @@ self.onmessage=async ev=>{
     const mod=engine||await ready;
     engine=mod;
     if(type==='init-grid'){
-      deleteGrid(grid);grid=null;
-      const width=ev.data.width,method=ev.data.method;
-      grid=createGrid(mod,width,Uint8Array.from(ev.data.cells),method);
-      post(id,'grid-answer',{...currentGrid(grid),cells:Array.from(grid.cells),width});
+      if(gridPair){deleteGrid(gridPair.baseline);deleteGrid(gridPair.enhanced);}
+      gridPair=null;
+      const width=ev.data.width,cells=Uint8Array.from(ev.data.cells);
+      // Paired comparison: EXACT SAME state, single atomic edit, two genuine
+      // C++20 engines. Baseline is native D* Lite; enhanced is D* Lite + gate.
+      const baseline=createGrid(mod,width,cells,1);
+      let enhanced=null;
+      try{enhanced=createGrid(mod,width,cells,2);}
+      catch(e){deleteGrid(baseline);throw e;}
+      gridPair={baseline,enhanced,events:0,avoided:0};
+      const b=currentGrid(baseline),g=currentGrid(enhanced);
+      if(b.cost!==g.cost)throw new Error('Initial D* Lite / MDO cost mismatch');
+      post(id,'grid-answer',{...g,baselineCost:b.cost,baselineRepaired:false,
+        enhancedRepaired:false,events:0,avoided:0,width});
     }else if(type==='grid-toggle'){
-      if(!grid)throw new Error('Grid not initialized');
-      post(id,'grid-answer',{...toggleGrid(grid,ev.data.vertex,ev.data.blocked),vertex:ev.data.vertex,blocked:ev.data.blocked});
+      if(!gridPair)throw new Error('Grid not initialized');
+      const {baseline,enhanced}=gridPair;
+      const vertex=ev.data.vertex,blocked=ev.data.blocked;
+      if(baseline.cells[vertex]===blocked)throw new Error('No-op grid update');
+      // C++ D* Lite always invokes its incremental replan for a real edit.
+      const b=toggleGrid(baseline,vertex,blocked);
+      const g=toggleGrid(enhanced,vertex,blocked);
+      if(b.cost!==g.cost)throw new Error('Independent methods disagree on shortest path');
+      gridPair.events++;
+      gridPair.avoided+=g.skipped;
+      post(id,'grid-answer',{...g,baselineCost:b.cost,baselineKernelUs:b.kernelUs,
+        enhancedKernelUs:g.kernelUs,baselineRepaired:true,enhancedRepaired:!g.skipped,
+        events:gridPair.events,avoided:gridPair.avoided,vertex,blocked});
     }else if(type==='bench'){
       const result=await runBenchmark(mod,id,ev.data.repeat);
       post(id,'bench-result',{result});
