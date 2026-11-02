@@ -84,7 +84,8 @@ async function runBenchmark(module,id,repeat=2){
   if(repeat<1||repeat>8)throw new Error('Benchmark repeat out of range');
   const sizes=[16,32,64],seeds=[11,29,53,71];
   const fixtures=sizes.flatMap(width=>seeds.map(seed=>makeFixture(width,seed,75)));
-  const samples=[[],[],[]],byMethod=[],eventsCount=0;
+  const samples=[[],[],[]],byMethod=[];
+  let eventsCount=0;
   const algorithmNames=['A*','D* Lite','Gate + D* Lite'];
   // Equal suite for all methods, each run uses fresh native state.
   for(let mode=0;mode<3;mode++){
