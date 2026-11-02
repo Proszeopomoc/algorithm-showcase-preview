@@ -2,10 +2,12 @@
 <html lang="pl"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="dark"><meta name="robots" content="noindex,nofollow,noarchive"><meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="dark">
+<meta name="robots" content="noindex,nofollow,noarchive">
+<meta name="referrer" content="no-referrer">
 <meta name="description" content="C++20 WebAssembly pathfinding, on-device benchmark, and moving-target snapshot TSP prototypes.">
 <title>Algorithm Showcase — C++20 / WebAssembly</title>
-<link rel="stylesheet" href="./styles.css">
+<link rel="stylesheet" href="./styles.css?v=mdo-explainer-20261102">
 </head>
 <body>
 <header class="site-head">
@@ -24,19 +26,76 @@
 </nav>
 <main class="container">
 <section class="view" id="view-path">
-  <div class="section-intro"><div><div class="eyebrow">01 / INTERACTIVE GRID</div><h2>Dynamic Pathfinding</h2><p>Dodaj przeszkodę. Usuń przeszkodę. Obserwuj, kiedy D* Lite musi liczyć nową ścieżkę, a kiedy może bezpiecznie użyć starej.</p></div><span class="tech-tag">4-neighbor · fixed endpoints</span></div>
-  <div class="path-layout"><div class="canvas-holder">
-    <canvas id="path-canvas" width="640" height="640" aria-label="Edytowalna mapa ścieżek"></canvas>
-    <div class="canvas-caption">Mysz: przytrzymaj i maluj. Dotyk: maluj wybranym narzędziem. Start i cel są stałe w narożnikach.</div>
+  <div class="section-intro path-intro"><div><div class="eyebrow">01 / TRASA W RUCHU</div><h2>Ta sama mapa. Mniej zbędnych obliczeń.</h2><p>Porównaj <strong>klasyczny D* Lite</strong> i <strong class="path-start-txt">nasz wariant MDO Safe Reuse</strong>. Oba znajdują poprawną, najkrótszą drogę. Różnica: nasz wariant potrafi pominąć niepotrzebne przeliczanie.</p></div><span class="tech-tag">C++20 / WebAssembly</span></div>
+  <div class="path-steps" aria-label="Jak używać demonstracji">
+    <div><span class="step-num">1</span> <strong>Zobacz trasę</strong><small>Zielona linia łączy start i cel.</small></div>
+    <div><span class="step-num">2</span> <strong>Wywołaj zmianę</strong><small>Poza trasą albo wprost na trasie.</small></div>
+    <div><span class="step-num">3</span> <strong>Porównaj decyzje</strong><small>Oba silniki, identyczne warunki.</small></div>
   </div>
-  <aside class="control-panel">
-    <label class="field">Silnik <select id="path-method"><option value="2">D* Lite + safe gate</option><option value="1">D* Lite</option><option value="0">A* — od zera</option></select></label>
-    <label class="field">Narzędzie <select id="path-brush"><option value="1">Blokuj komórki</option><option value="0">Odblokuj komórki</option></select></label>
-    <div class="pair"><button id="path-new">Nowa mapa</button><button id="path-clear" class="secondary">Wyczyść</button></div>
-    <div class="rule"></div>
-    <div class="metrics"><div><small>Długość najkrótszej trasy</small><strong id="path-cost">—</strong></div><div><small>Ostatnia aktualizacja (WASM)</small><strong id="path-time">—</strong></div><div><small>Bezpiecznie pominięte naprawy</small><strong id="path-skips">0</strong></div><div><small>Weryfikacja niezależnym BFS</small><strong id="path-check">—</strong></div></div>
-    <p class="hint">Wynik w tej symulacji obejmuje najkrótszą ścieżkę na jednorodnej siatce 2D. Nie uwzględnia innych agentów ani fizyki.</p>
-  </aside></div>
+  <div class="path-layout">
+    <div class="canvas-holder path-stage">
+      <div class="path-toolbar">
+        <div><strong>Wybierz narzędzie</strong><span>Potem dotknij lub przeciągnij palcem po mapie.</span></div>
+        <div class="brush-toggle" role="group" aria-label="Co robi dotknięcie mapy">
+          <button type="button" class="brush-option active" id="path-brush-add" aria-pressed="true">＋ Dodaj ścianę</button>
+          <button type="button" class="brush-option" id="path-brush-erase" aria-pressed="false">− Usuń ścianę</button>
+        </div>
+      </div>
+      <canvas id="path-canvas" width="640" height="640" aria-label="Mapa. Zielona linia oznacza najkrótszą trasę. Dotknięcie dodaje lub usuwa ścianę, w zależności od narzędzia."></canvas>
+      <div class="path-legend" aria-label="Legenda mapy">
+        <span><i class="legend-start"></i> Start</span>
+        <span><i class="legend-goal"></i> Cel</span>
+        <span><i class="legend-route"></i> Trasa</span>
+        <span><i class="legend-wall"></i> Ściana</span>
+      </div>
+      <div class="path-scenarios">
+  <div class="path-scenarios-title">Sprawdź dwa przypadki:</div>
+  <button type="button" id="path-demo-away" class="scenario-primary">① Ściana poza trasą <small>Tu nasza bramka oszczędza przeliczenie</small></button>
+  <button type="button" id="path-demo" class="scenario-secondary">② Ściana na trasie <small>Tu oba silniki muszą reagować</small></button>
+  <button type="button" id="path-undo" class="secondary path-undo" disabled>Cofnij ostatnią zmianę</button>
+</div>
+    </div>
+    <aside class="control-panel path-side">
+      <div class="path-explain">
+        <div class="eyebrow">NAJWAŻNIEJSZE: PO CO TA BRAMKA?</div>
+        <p>D* Lite normalnie aktualizuje plan po zmianie mapy. Nasz wariant najpierw sprawdza, czy nowa przeszkoda <strong>nie leży na istniejącej najkrótszej trasie</strong>. Jeżeli nie — może bezpiecznie zachować trasę bez przeliczania.</p>
+        <p class="path-authorship">◆ <strong>Nasz wkład: MDO Safe Reuse</strong> — własna implementacja i integracja bramki z D* Lite w C++20/WASM. Sama matematyczna zasada pomijania bezpiecznych przeliczeń jest znana.</p>
+      </div>
+      <div class="path-feedback" id="path-action-result" aria-live="polite">Gotowe. Zacznij od przycisku „Ściana poza trasą”, żeby zobaczyć różnicę.</div>
+      <div class="path-compare-heading"><strong>Co zrobiły silniki po ostatniej zmianie?</strong><small>Ta sama mapa • ta sama zmiana</small></div>
+      <div class="path-compare">
+        <div class="comparison-card comparison-baseline">
+          <strong>D* Lite <small>Wersja podstawowa</small></strong>
+          <div class="comparison-state" id="path-baseline-action">Czeka na zmianę</div>
+          <small>Aktualizacje planu: <span id="path-baseline-count">0</span></small>
+        </div>
+        <div class="comparison-card comparison-mdo">
+          <strong>MDO Safe Reuse <small>Nasz wariant + D* Lite</small></strong>
+          <div class="comparison-state" id="path-enhanced-action">Czeka na zmianę</div>
+          <small>Aktualizacje planu: <span id="path-enhanced-count">0</span></small>
+        </div>
+      </div>
+      <div class="path-benefit">
+        <div><span>Przeliczenia pominięte przez MDO</span><strong id="path-avoided">0 z 0</strong></div>
+        <div class="benefit-track"><div id="path-benefit-bar"></div></div>
+        <small id="path-benefit-desc">Zacznij od scenariusza ①, aby pokazać oszczędność pracy.</small>
+      </div>
+      <div class="path-key-metrics">
+        <div><small>Najkrótsza trasa obu silników</small><strong id="path-cost">—</strong></div>
+        <div><small>Weryfikacja BFS</small><strong id="path-check">Sprawdzam…</strong></div>
+      </div>
+      <div class="pair path-secondary-actions"><button type="button" id="path-new" class="secondary">Inna mapa</button><button type="button" id="path-clear" class="secondary">Usuń ściany</button></div>
+      <details class="path-advanced">
+        <summary>Wyniki techniczne i ograniczenia metody</summary>
+        <div class="metrics">
+          <div><small>Czas ostatniej aktualizacji — D* Lite</small><strong id="path-baseline-time">—</strong></div>
+          <div><small>Czas ostatniej aktualizacji — MDO</small><strong id="path-time">—</strong></div>
+          <div><small>Bezpiecznie pominięte aktualizacje</small><strong id="path-skips">0</strong></div>
+        </div>
+        <p class="hint">Czasy pojedynczych dotknięć są zbyt krótkie na rzetelną ocenę przewagi na telefonie. O szybkości decyduje dopiero pełny benchmark z modułu 02. Bramka korzysta ze znanej własności najkrótszej trasy: dodanie przeszkody poza nią nie może polepszyć kosztu. Usunięcie ściany wymaga ponownego sprawdzenia. Wszystkie wyniki są kontrolowane przez niezależny BFS.</p>
+      </details>
+    </aside>
+  </div>
 </section>
 <section class="view hidden" id="view-benchmark">
   <div class="section-intro"><div><div class="eyebrow">02 / YOUR CPU, YOUR RESULT</div><h2>Browser Benchmark Lab</h2><p>Ten sam strumień zmian dla trzech implementacji C++. Poprawność każdej trasy weryfikuje niezależny BFS w JavaScript.</p></div><span class="tech-tag">WASM · local only</span></div>
@@ -45,7 +104,7 @@
   <div class="chart-wrap"><canvas id="bench-chart" width="1120" height="410" aria-label="Wykres wyników benchmarku"></canvas></div>
   <div id="bench-table" class="table-wrap"><p class="empty">Po uruchomieniu pojawią się wyniki.</p></div>
   <p class="hint">Mierzony czas = wyłącznie wywołanie natywnego kernela WebAssembly. Generowanie map, niezależna walidacja BFS, renderowanie, zimny start WASM i przesyłanie danych są wyłączone z podawanego czasu. Wynik zależy od sprzętu i przeglądarki. Używamy własnej implementacji D* Lite jako baseline.</p>
-  <details class="method"><summary>Historyczne wyniki native (nie są pomiarem tej strony)</summary><p>W teście Linux/GitHub Actions 12 map, 900 zdarzeń, 900/900 prawidłowych tras, Gate+D* Lite osiągnął sumaryczny czas przetwarzania 14,96 ms wobec 23,01 ms dla implementacji D* Lite z repozytorium: ~1,54×. Inne testy dały mniejszy zysk. To zależny od obciążenia wynik, a nie gwarancja.</p><a href="https://github.com/Proszeopomoc/mcdo-benchmark/blob/main/reports/2026-11-01-41331724171/C_API_VERIFICATION.md" target="_blank" rel="noreferrer">Protokół źródłowy</a></details>
+  <details class="method"><summary>Historyczne wyniki native (nie są pomiarem tej strony)</summary><p>W teście Linux/GitHub Actions 12 map, 900 zdarzeń, 900/900 prawidłowych tras, MDO Safe Reuse + D* Lite osiągnął sumaryczny czas przetwarzania 14,96 ms wobec 23,01 ms dla implementacji D* Lite z repozytorium: ~1,54×. Inne testy dały mniejszy zysk. To zależny od obciążenia wynik, a nie gwarancja.</p><a href="https://github.com/Proszeopomoc/mcdo-benchmark/blob/main/reports/2026-11-01-41331724171/C_API_VERIFICATION.md" target="_blank" rel="noreferrer">Protokół źródłowy</a></details>
 </section>
 <section class="view hidden" id="view-fireflies">
   <div class="section-intro"><div><div class="eyebrow">03 / DYNAMIC WORLD, STATIC SNAPSHOTS</div><h2>Moving Target TSP <span class="accent">/ Fireflies</span></h2><p>Świetliki nie zatrzymują się. Dwa niezależne łowce dostają aktualne pozycje i na bieżąco przeliczają kolejność odwiedzin.</p></div><span class="tech-tag">Snapshot TSP · experimental</span></div>
@@ -59,5 +118,5 @@
 </section>
 </main>
 <footer class="container footer"><span>ALGORITHM / LAB · LOCAL PROTOTYPE</span><span>Source + constraints: <a href="https://github.com/Proszeopomoc/mcdo-benchmark" target="_blank" rel="noreferrer">mcdo-benchmark</a></span></footer>
-<script type="module" src="./app.mjs?v=benchmark-fixed-20261102"></script>
+<script type="module" src="./app.mjs?v=mdo-explainer-20261102"></script>
 </body></html>
