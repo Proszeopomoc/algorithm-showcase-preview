@@ -1,7 +1,7 @@
 import {makeFixture,rng32} from './verifier.mjs';
 
 const $=s=>document.querySelector(s);
-const worker=new Worker(new URL('./engine-worker.mjs',import.meta.url),{type:'module'});
+const worker=new Worker(new URL('./engine-worker.mjs?v=benchmark-fixed-20261102',import.meta.url),{type:'module'});
 const pending=new Map();
 let nextID=1;
 function status(txt,ok=true){$('#engine-status').textContent=txt;$('#engine-status').style.color=ok?'#8fc6b5':'#ee9d93';}
